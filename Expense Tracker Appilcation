@@ -1,0 +1,547 @@
+import java.awt.*;
+import java.awt.event.*;
+import java.io.*;
+import java.util.*;
+
+public class ExpenseTracker extends Frame
+        implements ActionListener {
+
+    // ---------- Data class ----------
+    static class Transaction {
+        double amount;
+        String type, category, date, desc;
+
+        Transaction(double a, String t, String c,
+                    String d, String ds) {
+            amount = a;
+            type = t;
+            category = c;
+            date = d;
+            desc = ds;
+        }
+    }
+
+    // ---------- Components ----------
+    TextField tfAmount = new TextField(15);
+    TextField tfDate = new TextField(15);
+    TextField tfDesc = new TextField(15);
+
+    Choice chType = new Choice();
+    Choice chCategory = new Choice();
+
+    java.awt.List list = new java.awt.List(10);
+    TextArea taInfo = new TextArea(5, 40);
+
+    Button btnAddIncome = new Button("Add Income");
+    Button btnAddExpense = new Button("Add Expense");
+    Button btnView = new Button("View All");
+    Button btnFilter = new Button("Filter");
+    Button btnTotal = new Button("Financial Summary");
+    Button btnUpdate = new Button("Update");
+    Button btnDelete = new Button("Delete");
+    Button btnExit = new Button("Exit");
+
+    // ---------- Storage ----------
+    ArrayList<Transaction> transactions =
+            new ArrayList<>();
+
+    ArrayList<Transaction> shown =
+            new ArrayList<>();
+
+    static final String FILE = "expenses.txt";
+
+    // ---------- Constructor ----------
+    public ExpenseTracker() {
+        super("Income and Expense Tracker");
+
+        setLayout(new BorderLayout(10, 10));
+        setBackground(new Color(235, 240, 250));
+
+        // Transaction type
+        chType.add("Income");
+        chType.add("Expense");
+
+        // Categories
+        updateCategories();
+
+        chType.addItemListener(e -> updateCategories());
+
+        // Form
+        Panel form = new Panel(
+                new GridLayout(5, 2, 8, 8));
+
+        form.add(new Label("Transaction Type:"));
+        form.add(chType);
+
+        form.add(new Label("Amount:"));
+        form.add(tfAmount);
+
+        form.add(new Label("Category:"));
+        form.add(chCategory);
+
+        form.add(new Label("Date (dd/mm/yyyy):"));
+        form.add(tfDate);
+
+        form.add(new Label("Description:"));
+        form.add(tfDesc);
+
+        add(form, BorderLayout.NORTH);
+
+        // Transaction list
+        list.setBackground(Color.WHITE);
+        add(list, BorderLayout.CENTER);
+
+        // Buttons
+        Panel buttons = new Panel(
+                new GridLayout(2, 4, 6, 6));
+
+        buttons.add(btnAddIncome);
+        buttons.add(btnAddExpense);
+        buttons.add(btnView);
+        buttons.add(btnFilter);
+        buttons.add(btnTotal);
+        buttons.add(btnUpdate);
+        buttons.add(btnDelete);
+        buttons.add(btnExit);
+
+        // Information area
+        Panel south = new Panel(new BorderLayout(5, 5));
+
+        south.add(buttons, BorderLayout.NORTH);
+
+        taInfo.setEditable(false);
+        south.add(taInfo, BorderLayout.CENTER);
+
+        add(south, BorderLayout.SOUTH);
+
+        // Action listeners
+        btnAddIncome.addActionListener(this);
+        btnAddExpense.addActionListener(this);
+        btnView.addActionListener(this);
+        btnFilter.addActionListener(this);
+        btnTotal.addActionListener(this);
+        btnUpdate.addActionListener(this);
+        btnDelete.addActionListener(this);
+        btnExit.addActionListener(this);
+
+        // Select transaction for update
+        list.addItemListener(e -> {
+            int i = list.getSelectedIndex();
+
+            if (i >= 0 && i < shown.size()) {
+                Transaction x = shown.get(i);
+
+                chType.select(x.type);
+                updateCategories();
+                tfAmount.setText(
+                        String.valueOf(x.amount));
+                chCategory.select(x.category);
+                tfDate.setText(x.date);
+                tfDesc.setText(x.desc);
+            }
+        });
+
+        addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent e) {
+                exitApp();
+            }
+        });
+
+        load();
+        showAll();
+
+        setSize(650, 600);
+        setLocationRelativeTo(null);
+        setVisible(true);
+    }
+
+    // ---------- Category selection ----------
+    void updateCategories() {
+        String old = chCategory.getSelectedItem();
+
+        chCategory.removeAll();
+
+        if (chType.getSelectedItem().equals("Income")) {
+            chCategory.add("Salary");
+            chCategory.add("Allowance");
+            chCategory.add("Scholarship");
+            chCategory.add("Business");
+            chCategory.add("Other");
+        } else {
+            chCategory.add("Food");
+            chCategory.add("Travel");
+            chCategory.add("Shopping");
+            chCategory.add("Bills");
+            chCategory.add("Education");
+            chCategory.add("Other");
+        }
+
+        if (old != null) {
+            try {
+                chCategory.select(old);
+            } catch (IllegalArgumentException ex) {
+                // Keep the first category selected
+            }
+        }
+    }
+
+    // ---------- Button handling ----------
+    public void actionPerformed(ActionEvent e) {
+
+        Object s = e.getSource();
+
+        if (s == btnAddIncome) {
+            chType.select("Income");
+            updateCategories();
+            addTransaction();
+        }
+
+        else if (s == btnAddExpense) {
+            chType.select("Expense");
+            updateCategories();
+            addTransaction();
+        }
+
+        else if (s == btnView) {
+            showAll();
+            taInfo.setText("Showing all transactions.");
+        }
+
+        else if (s == btnFilter) {
+            filterTransactions();
+        }
+
+        else if (s == btnTotal) {
+            showSummary();
+        }
+
+        else if (s == btnUpdate) {
+            updateTransaction();
+        }
+
+        else if (s == btnDelete) {
+            deleteTransaction();
+        }
+
+        else if (s == btnExit) {
+            exitApp();
+        }
+    }
+
+    // ---------- Add Income / Expense ----------
+    void addTransaction() {
+
+        Transaction x = readForm();
+
+        if (x == null) return;
+
+        transactions.add(x);
+
+        save();
+        showAll();
+        clearForm();
+
+        taInfo.setText(
+                x.type + " added successfully.");
+    }
+
+    // ---------- View all ----------
+    void showAll() {
+
+        shown.clear();
+        shown.addAll(transactions);
+
+        refreshList();
+    }
+
+    // ---------- Filter ----------
+    void filterTransactions() {
+
+        String cat = chCategory.getSelectedItem();
+        String type = chType.getSelectedItem();
+        String date = tfDate.getText().trim();
+
+        shown.clear();
+
+        for (Transaction x : transactions) {
+
+            boolean typeOk = x.type.equals(type);
+            boolean catOk = x.category.equals(cat);
+            boolean dateOk = date.isEmpty()
+                    || x.date.equals(date);
+
+            if (typeOk && catOk && dateOk) {
+                shown.add(x);
+            }
+        }
+
+        refreshList();
+
+        taInfo.setText(
+                "Filtered by " + type +
+                " category: " + cat +
+                "\nRecords found: " + shown.size());
+    }
+
+    // ---------- Financial Summary ----------
+    void showSummary() {
+
+    double totalIncome = 0;
+    double totalExpense = 0;
+
+    // Store category-wise expenses
+    Map<String, Double> expenseByCategory =
+            new LinkedHashMap<>();
+
+    // Store category-wise income
+    Map<String, Double> incomeByCategory =
+            new LinkedHashMap<>();
+
+    for (Transaction x : transactions) {
+
+        if (x.type.equals("Income")) {
+
+            totalIncome += x.amount;
+
+            incomeByCategory.merge(
+                x.category, x.amount, Double::sum);
+
+        } else {
+
+            totalExpense += x.amount;
+
+            expenseByCategory.merge(
+                x.category, x.amount, Double::sum);
+        }
+    }
+
+    double balance = totalIncome - totalExpense;
+
+    StringBuilder sb = new StringBuilder();
+
+    sb.append("===== FINANCIAL SUMMARY =====\n\n");
+
+    sb.append("TOTAL INCOME : ")
+      .append(String.format("%.2f", totalIncome))
+      .append("\n\n");
+
+    sb.append("TOTAL EXPENSES : ")
+      .append(String.format("%.2f", totalExpense))
+      .append("\n\n");
+
+    sb.append("===== CATEGORY-WISE SPENDING =====\n\n");
+
+    for (Map.Entry<String, Double> entry :
+            expenseByCategory.entrySet()) {
+
+        sb.append(entry.getKey())
+          .append(" : ")
+          .append(String.format("%.2f", entry.getValue()))
+          .append("\n");
+    }
+
+    sb.append("\n===== CATEGORY-WISE INCOME =====\n\n");
+
+    for (Map.Entry<String, Double> entry :
+            incomeByCategory.entrySet()) {
+
+        sb.append(entry.getKey())
+          .append(" : ")
+          .append(String.format("%.2f", entry.getValue()))
+          .append("\n");
+    }
+
+    sb.append("\n-----------------------------\n");
+
+    sb.append("REMAINING BALANCE : ")
+      .append(String.format("%.2f", balance));
+
+    taInfo.setText(sb.toString());
+}
+
+    // ---------- Update ----------
+    void updateTransaction() {
+
+        int i = list.getSelectedIndex();
+
+        if (i < 0) {
+            taInfo.setText(
+                    "Select a transaction to update.");
+            return;
+        }
+
+        Transaction x = readForm();
+
+        if (x == null) return;
+
+        Transaction old = shown.get(i);
+
+        old.type = x.type;
+        old.amount = x.amount;
+        old.category = x.category;
+        old.date = x.date;
+        old.desc = x.desc;
+
+        save();
+        showAll();
+        clearForm();
+
+        taInfo.setText(
+                "Transaction updated successfully.");
+    }
+
+    // ---------- Delete ----------
+    void deleteTransaction() {
+
+        int i = list.getSelectedIndex();
+
+        if (i < 0) {
+            taInfo.setText(
+                    "Select a transaction to delete.");
+            return;
+        }
+
+        transactions.remove(shown.get(i));
+
+        save();
+        showAll();
+        clearForm();
+
+        taInfo.setText(
+                "Transaction deleted successfully.");
+    }
+
+    // ---------- Exit ----------
+    void exitApp() {
+
+        save();
+        dispose();
+        System.exit(0);
+    }
+
+    // ---------- Read form ----------
+    Transaction readForm() {
+
+        String a = tfAmount.getText().trim();
+        String d = tfDate.getText().trim();
+        String ds = tfDesc.getText().trim();
+
+        if (a.isEmpty() || d.isEmpty()) {
+            taInfo.setText(
+                    "Please enter amount and date.");
+            return null;
+        }
+
+        double amt;
+
+        try {
+            amt = Double.parseDouble(a);
+        } catch (NumberFormatException ex) {
+            taInfo.setText(
+                    "Amount must be a number.");
+            return null;
+        }
+
+        if (amt <= 0) {
+            taInfo.setText(
+                    "Amount must be greater than 0.");
+            return null;
+        }
+
+        return new Transaction(
+                amt,
+                chType.getSelectedItem(),
+                chCategory.getSelectedItem(),
+                d,
+                ds.replace("\t", " ")
+                  .replace("\n", " "));
+    }
+
+    // ---------- Refresh list ----------
+    void refreshList() {
+
+        list.removeAll();
+
+        for (Transaction x : shown) {
+
+            list.add(
+                    x.type + " | " +
+                    x.category + " | " +
+                    x.date + " | " +
+                    String.format("%.2f", x.amount) +
+                    " | " + x.desc);
+        }
+    }
+
+    // ---------- Clear form ----------
+    void clearForm() {
+
+        tfAmount.setText("");
+        tfDate.setText("");
+        tfDesc.setText("");
+    }
+
+    // ---------- Save to file ----------
+    void save() {
+
+        try (PrintWriter pw =
+                new PrintWriter(new FileWriter(FILE))) {
+
+            for (Transaction x : transactions) {
+
+                pw.println(
+                        x.type + "\t" +
+                        x.amount + "\t" +
+                        x.category + "\t" +
+                        x.date + "\t" +
+                        x.desc);
+            }
+
+        } catch (IOException ex) {
+
+            taInfo.setText(
+                    "Could not save: " + ex.getMessage());
+        }
+    }
+
+    // ---------- Load from file ----------
+    void load() {
+
+        File f = new File(FILE);
+
+        if (!f.exists()) return;
+
+        try (BufferedReader br =
+                new BufferedReader(new FileReader(f))) {
+
+            String line;
+
+            while ((line = br.readLine()) != null) {
+
+                String[] p = line.split("\t", 5);
+
+                if (p.length >= 4) {
+
+                    transactions.add(
+                            new Transaction(
+                                    Double.parseDouble(p[1]),
+                                    p[0],
+                                    p[2],
+                                    p[3],
+                                    p.length == 5 ? p[4] : ""));
+                }
+            }
+
+        } catch (Exception ex) {
+
+            taInfo.setText(
+                    "Could not load saved data.");
+        }
+    }
+
+    // ---------- Main ----------
+    public static void main(String[] args) {
+
+        new ExpenseTracker();
+    }
+}
